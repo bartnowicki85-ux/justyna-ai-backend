@@ -1,3 +1,6 @@
+app.get("/", (req, res) => {
+  res.send("Justyna AI działa 💇‍♀️");
+});
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
