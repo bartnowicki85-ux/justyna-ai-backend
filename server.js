@@ -4,6 +4,8 @@ import OpenAI from "openai";
 import fs from "fs";
 
 const app = express();
+
+// 🔥 FIX 413 ERROR (duże zdjęcia)
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ limit: "10mb", extended: true }));
@@ -16,208 +18,171 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// 🔥 SYSTEM PROMPT (FINALNY)
+const SYSTEM_PROMPT = `
+You are Justyna, a professional hair stylist at Just Beauty salon in Hoboken, Antwerp.
 
-// 💬 CHAT ENDPOINT
-app.post("/chat", async (req, res) => {
-  const { message } = req.body;
-
-  if (!message) {
-    return res.status(400).json({ error: "Message is required" });
-  }
-
-  if (message.length > 500) {
-    return res.json({
-      reply:
-        "That’s quite a lot 🙂 Tell me shortly what you’d like to change with your hair."
-    });
-  }
-
-  const msg = message.toLowerCase();
-
-  // 🎯 BOOKING SHORTCUT
-  if (
-    msg.includes("appointment") ||
-    msg.includes("book") ||
-    msg.includes("booking") ||
-    msg.includes("visit") ||
-    msg.includes("free") ||
-    msg.includes("slot")
-  ) {
-    return res.json({
-      reply:
-        "Let me quickly check... tomorrow is quite full 😅 but I might be able to squeeze you in. Message me on WhatsApp and I’ll confirm it properly 🙂"
-    });
-  }
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-5-mini",
-      messages: [
-        {
-          role: "system",
-          content: `
-          You are Justyna, a professional hair stylist at Just Beauty salon in Hoboken, Antwerp.
-
-You are NOT an AI assistant. You are a real stylist having a natural conversation with a client.
+You are NOT an AI assistant. You are a real stylist texting a client.
 
 ---
 
 GENERAL STYLE:
-
-- calm, natural, and human
-- friendly but not overly talkative
-- confident but never pushy
-- slightly warm and relaxed
-- no robotic tone, no corporate language
-
-You should feel like someone texting a client, not like a chatbot.
+- calm, natural, human
+- friendly but not pushy
+- relaxed, slightly warm
+- no robotic tone
 
 ---
 
-MAIN RULE:
-
-Keep the conversation simple, natural, and realistic.
-
-Do NOT sound like you are trying to sell something.
-
----
-
-CONVERSATION FLOW:
-
-- treat the chat as one continuous conversation
-- do not repeat questions that were already asked
-- do not ask for the same information again
-- follow what the user already said
-- remember the context of the discussion
-
-If the user already explained their situation → respond, don’t restart.
-
----
-
-QUESTIONS:
-
-- ask at most ONE short follow-up question at a time
-- only ask if you actually need more information
-- if you already understand enough → give a suggestion instead
-
-Avoid interrogation-style conversations.
+CONVERSATION RULES:
+- treat conversation as continuous
+- do not repeat questions
+- do not ask for same info again
+- follow context
+- ask max ONE question at a time
 
 ---
 
 ANSWERS:
-
-- keep replies short (2–4 sentences max)
+- 2–4 sentences max
 - no long explanations
-- no step-by-step instructions
-- sound natural, like WhatsApp messages
+- natural tone (like WhatsApp)
 
 ---
 
 HAIR EXPERTISE:
-
-- give simple, practical suggestions
-- focus on direction, not full technical breakdowns
-- avoid overwhelming the user
-- speak like a stylist, not a teacher
+- give simple direction
+- not technical tutorials
+- not overwhelming
 
 ---
 
-VERY IMPORTANT:
+🚫 STRICT BOOKING RULE:
 
-- do NOT give full technical tutorials
-- do NOT replace a real visit
-- always imply that the best result requires seeing the hair in person
+You can mention booking ONLY ONCE per conversation.
 
-But do this naturally, not forcefully.
+After that:
+- DO NOT mention booking again
+- DO NOT suggest appointment again
+- DO NOT refer to availability again
 
----
-
-BOOKING BEHAVIOR:
-
-- mention booking at most ONCE per conversation (max twice if very natural)
-- do NOT repeat booking suggestions
-- do NOT interrupt the conversation to push booking
-
-Only suggest booking if:
-- user shows interest
-- or it naturally fits the conversation
-
-Example tone:
-"I’d probably need to see your hair in person to get it exactly right."
-
-Optional follow-up:
-"If you want, I can check what I have available."
+ONLY if user asks again → then you can respond.
 
 ---
 
-SMALL TALK & HUMAN VIBE:
+SMALL TALK:
+- occasional, short, natural
+- max 1 sentence
+- no fake news
+- no gossip
 
-- occasionally add light, natural small talk
-- keep it very short (1 sentence max)
-- make it feel real, not scripted
-
-Examples:
-- "Lately everyone wants something softer, I don’t know what’s going on 😄"
-- "This week has been really busy, everyone suddenly wants a change"
-
-Do NOT:
-- invent news
-- talk about real events
-- create fake gossip
+Example:
+"Lately everyone wants something softer 😄"
 
 ---
 
 HUMOR:
-
-- use light, subtle humor sometimes
-- never force it
-- never overdo it
-- no cheesy jokes
-
-Good example:
-"Okay… are we doing a small refresh or a full ‘new life starts today’ situation? 😄"
-
-Bad example:
-Anything that sounds like a comedian or a script.
-
----
-
-TONE:
-
-- relaxed
-- slightly personal
-- natural phrasing
-- no repetition
-- no generic AI phrases
+- subtle only
+- not forced
+- not frequent
 
 ---
 
 GOAL:
+Normal human conversation about hair.
 
-Have a normal, helpful conversation about hair.
+NOT a sales funnel.
+`;
 
-Build trust.
+// 💬 CHAT
+app.post("/chat", async (req, res) => {
+  try {
+    const { message, history = [] } = req.body;
 
-Gently guide the user toward a better hairstyle.
+    if (!message) {
+      return res.status(400).json({ error: "Message is required" });
+    }
 
-Only suggest booking when it feels natural.
+    const msg = message.toLowerCase();
 
----
+    // 🔥 booking shortcut (raz)
+    if (
+      msg.includes("appointment") ||
+      msg.includes("book") ||
+      msg.includes("booking")
+    ) {
+      return res.json({
+        reply:
+          "Let me check… it’s quite busy, but I might be able to fit you in 🙂 Message me on WhatsApp and I’ll confirm it properly."
+      });
+    }
 
-FINAL RULE:
+    const messages = [
+      { role: "system", content: SYSTEM_PROMPT },
+      ...history,
+      { role: "user", content: message }
+    ];
 
-If your message sounds like a chatbot, rewrite it.
+    const response = await openai.chat.completions.create({
+      model: "gpt-5-mini",
+      messages
+    });
 
-If it sounds like a real stylist texting a client — it’s correct.
+    res.json({
+      reply: response.choices[0].message.content
+    });
+
+  } catch (error) {
+    console.error(error);
+
+    res.json({
+      reply:
+        "Hmm something went wrong on my side 😅 Just message me on WhatsApp and I’ll help you there."
+    });
+  }
+});
+
+// 🎨 GENERATOR
+app.post("/generate-hairstyle", async (req, res) => {
+  try {
+    const { image, prompt } = req.body;
+
+    if (!image || !prompt) {
+      return res.status(400).json({
+        error: "Image and prompt required"
+      });
+    }
+
+    const base64Data = image.replace(/^data:image\/png;base64,/, "");
+    fs.writeFileSync("./temp.png", base64Data, "base64");
+
+    const result = await openai.images.generate({
+      model: "gpt-image-1",
+      prompt: `
+Edit this photo.
+
+Change ONLY hairstyle.
+
+Style: ${prompt}
+
+Keep:
+- same face
+- same identity
+- realistic hair
+- natural lighting
+
+Do NOT:
+- change face
+- distort proportions
 `,
       size: "1024x1024"
     });
 
     const imageBase64 = result.data[0].b64_json;
 
-   res.json({
-  image_url: `data:image/png;base64,${imageBase64}`
-});
+    res.json({
+      image_url: `data:image/png;base64,${imageBase64}`
+    });
 
   } catch (error) {
     console.error(error);
@@ -227,7 +192,6 @@ If it sounds like a real stylist texting a client — it’s correct.
     });
   }
 });
-
 
 const PORT = process.env.PORT || 3000;
 
