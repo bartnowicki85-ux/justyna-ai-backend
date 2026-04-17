@@ -191,9 +191,9 @@ Do NOT:
 
     const imageBase64 = result.data[0].b64_json;
 
-    res.json({
-      image: `data:image/png;base64,${imageBase64}`
-    });
+   res.json({
+  image_url: `data:image/png;base64,${imageBase64}`
+});
 
   } catch (error) {
     console.error(error);
